@@ -37,6 +37,10 @@ const (
 	// the fallback encoding (usually plain) instead of continuing to build the
 	// dictionary index.
 	DefaultDictionaryPageSizeLimit = DefaultDataPageSize
+	// Default is to discard the dictionary before the first data page of a chunk
+	// when it is not smaller than the raw values, use WithDictionaryCostFallback
+	// writer property to change that.
+	DefaultDictionaryCostFallbackEnabled = true
 	// In order to attempt to facilitate data page size limits for writing,
 	// data is written in batches. Increasing the batch size may improve performance
 	// but the larger the batch size, the easier it is to overshoot the datapage limit.
@@ -159,6 +163,19 @@ func WithDictionaryPath(path ColumnPath, dict bool) WriterProperty {
 func WithDictionaryPageSizeLimit(limit int64) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.wr.dictPagesize = limit
+	}
+}
+
+// WithDictionaryCostFallback controls the cost-based dictionary fallback: before the
+// first data page of a column chunk is cut, the writer discards the dictionary and
+// falls back to the plain encoding when the dictionary plus the encoded indices are
+// not smaller than the raw values (mirroring parquet-mr's shouldFallBack). That
+// comparison is done on uncompressed sizes, so it can discard dictionaries that would
+// have won after page compression — pass false to keep an explicitly requested
+// dictionary regardless. The DictionaryPageSizeLimit fallback always stays in effect.
+func WithDictionaryCostFallback(enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.dictCostFallback = enabled
 	}
 }
 
@@ -488,6 +505,7 @@ func WithBloomFilterNDVPath(path ColumnPath, ndv int64) WriterProperty {
 type WriterProperties struct {
 	mem                 memory.Allocator
 	dictPagesize        int64
+	dictCostFallback    bool
 	batchSize           int64
 	maxRowGroupLen      int64
 	pageSize            int64
@@ -509,6 +527,7 @@ func defaultWriterProperties() *WriterProperties {
 	return &WriterProperties{
 		mem:                 memory.DefaultAllocator,
 		dictPagesize:        DefaultDictionaryPageSizeLimit,
+		dictCostFallback:    DefaultDictionaryCostFallbackEnabled,
 		batchSize:           DefaultWriteBatchSize,
 		maxRowGroupLen:      DefaultMaxRowGroupLen,
 		pageSize:            DefaultDataPageSize,
@@ -626,6 +645,10 @@ func (w *WriterProperties) RootRepetition() Repetition       { return w.rootRepe
 func (w *WriterProperties) WriteBatchSize() int64            { return w.batchSize }
 func (w *WriterProperties) DataPageSize() int64              { return w.pageSize }
 func (w *WriterProperties) DictionaryPageSizeLimit() int64   { return w.dictPagesize }
+
+// DictionaryCostFallbackEnabled returns whether the pre-first-page cost-based
+// dictionary fallback is active, see WithDictionaryCostFallback.
+func (w *WriterProperties) DictionaryCostFallbackEnabled() bool { return w.dictCostFallback }
 func (w *WriterProperties) Version() Version                 { return w.parquetVersion }
 func (w *WriterProperties) DataPageVersion() DataPageVersion { return w.dataPageVersion }
 func (w *WriterProperties) MaxRowGroupLength() int64         { return w.maxRowGroupLen }
